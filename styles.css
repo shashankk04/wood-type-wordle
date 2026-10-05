@@ -88,6 +88,14 @@ body {
 .mast-side { display: flex; gap: 2px; }
 .mast-side.right { justify-content: flex-end; }
 .mast-center { text-align: center; min-width: 0; }
+.welcome {
+  margin: 0 0 5px;
+  font-family: var(--note);
+  font-style: italic;
+  font-size: .9rem;
+  line-height: 1;
+  color: var(--ink-p-hi);
+}
 .title {
   margin: 0;
   padding-left: .1em; /* balances the trailing letter-spacing */
@@ -334,7 +342,7 @@ body {
 /* ---------- toasts ---------- */
 .toasts {
   position: fixed;
-  top: calc(env(safe-area-inset-top, 0px) + 128px);
+  top: calc(env(safe-area-inset-top, 0px) + 150px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 40;
