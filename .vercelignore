@@ -1,0 +1,7 @@
+# Only the game itself is served. Keep secrets and build tooling out of the upload.
+.env*
+.vercel
+.git
+tools
+data
+README.md
