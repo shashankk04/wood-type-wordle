@@ -516,13 +516,13 @@
   var openModalEl = null;
   var lastFocus = null;
 
-  function openModal(id) {
+  function openModal(id, focusSelector) {
     if (openModalEl) closeModal(true);
     var m = $(id);
     lastFocus = document.activeElement;
     m.hidden = false;
     openModalEl = m;
-    m.querySelector('.sheet').focus();
+    m.querySelector(focusSelector || '.sheet').focus();
   }
   function closeModal(swapping) {
     if (!openModalEl) return;
@@ -546,6 +546,57 @@
   Array.prototype.forEach.call(document.querySelectorAll('[data-close]'), function (b) {
     b.addEventListener('click', function () { closeModal(); });
   });
+
+  // ---------- welcome ----------
+
+  function dailyStatus(d) {
+    if (d.status === 'won') return 'Solved in ' + d.guesses.length;
+    if (d.status === 'lost') return 'Not solved';
+    return d.guesses.length ? d.guesses.length + ' of ' + d.rows + ' tries used' : 'Not started';
+  }
+
+  function openWelcome() {
+    var day = dailies[LENGTHS[0]].day;
+    var date = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
+    $('welcome-edition').textContent = 'No. ' + (day + 1) + ' · ' + date;
+
+    var wrap = $('welcome-sizes');
+    wrap.textContent = '';
+    LENGTHS.forEach(function (len) {
+      var d = dailies[len], status = dailyStatus(d);
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'size-card';
+      card.setAttribute('aria-pressed', String(game.mode === 'daily' && game.len === len));
+      card.setAttribute('aria-label', 'Play ' + len + ' letters, ' + status);
+
+      var block = document.createElement('span');
+      block.className = 'tile';
+      block.dataset.state = d.status === 'won' ? 'correct' : d.status === 'lost' ? 'absent' : 'tbd';
+      block.textContent = len;
+      var name = document.createElement('span');
+      name.className = 'size-name';
+      name.textContent = len + ' letters';
+      var note = document.createElement('span');
+      note.className = 'size-status';
+      note.textContent = status;
+      card.append(block, name, note);
+
+      card.addEventListener('click', function () {
+        settings.length = len;
+        writeStore();
+        if (game === dailies[len]) closeModal();
+        else switchTo(dailies[len]); // switchTo closes the popup too
+      });
+      wrap.appendChild(card);
+    });
+
+    $('btn-welcome-play').textContent = 'Play ' + game.len + ' letters';
+    openModal('modal-welcome', '#btn-welcome-play');
+  }
+
+  $('btn-welcome-play').addEventListener('click', function () { closeModal(); });
+  $('btn-welcome-help').addEventListener('click', function () { openModal('modal-help'); });
 
   $('btn-help').addEventListener('click', function () { openModal('modal-help'); });
   $('btn-stats').addEventListener('click', openStats);
@@ -722,12 +773,10 @@
     applyContrast();
     renderAll();
 
-    if (firstVisit) {
-      writeStore();
-      later(function () { openModal('modal-help'); }, 350);
-    } else if (game.mode === 'daily' && game.status !== 'playing') {
-      later(openStats, 600);
-    }
+    if (firstVisit) writeStore();
+    // Greet every fresh page load; skip it when a live update restores a board.
+    var restoring = data.practice || typeof data.current === 'string';
+    if (!restoring) later(openWelcome, 250);
   }
 
   // Keep the current board across live page updates.

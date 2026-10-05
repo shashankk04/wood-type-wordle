@@ -58,6 +58,26 @@
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <div class="sr-only" id="live" aria-live="polite"></div>
 
+<div class="overlay" id="modal-welcome" hidden>
+  <section class="sheet welcome-sheet" role="dialog" aria-modal="true" aria-labelledby="welcome-title" aria-describedby="welcome-desc" tabindex="-1">
+    <button type="button" class="sheet-close" data-close aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <div class="welcome-blocks" role="img" aria-label="hey chatz">
+      <div class="wrow"><span class="tile" data-state="present" style="--i:0">H</span><span class="tile" data-state="present" style="--i:1">E</span><span class="tile" data-state="present" style="--i:2">Y</span></div>
+      <div class="wrow"><span class="tile" data-state="correct" style="--i:3">C</span><span class="tile" data-state="correct" style="--i:4">H</span><span class="tile" data-state="correct" style="--i:5">A</span><span class="tile" data-state="correct" style="--i:6">T</span><span class="tile" data-state="correct" style="--i:7">Z</span></div>
+    </div>
+    <h2 id="welcome-title">Welcome to Wood Type Wordle</h2>
+    <p class="welcome-edition" id="welcome-edition">No. 1</p>
+    <p id="welcome-desc">Fresh words are set on the press every day. Pick a size and see how many tries it takes you.</p>
+    <div class="welcome-sizes" id="welcome-sizes"></div>
+    <div class="welcome-actions">
+      <button type="button" class="btn" id="btn-welcome-play">Play 5 letters</button>
+      <button type="button" class="link-btn" id="btn-welcome-help">How to play</button>
+    </div>
+  </section>
+</div>
+
 <div class="overlay" id="modal-help" hidden>
   <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="help-title" tabindex="-1">
     <button type="button" class="sheet-close" data-close aria-label="Close">
