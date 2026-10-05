@@ -2,9 +2,7 @@
   'use strict';
 
   var LENGTHS = [3, 5, 7];
-  var LAUNCH_UTC = Date.UTC(2026, 9, 1); // puzzle No. 1 is 1 Oct 2026
-  var STORE_KEY = 'woodtype-wordle:v2';
-  var OLD_STORE_KEY = 'woodtype-wordle:v1'; // 5-letter only, migrated on first load
+  var STORE_KEY = 'woodtype-wordle:v3';
   var STAMP_MS = 500;
   var STEP_MS = 280;
   var RANK = { absent: 1, present: 2, correct: 3 };
@@ -29,46 +27,38 @@
   }
   function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
 
-  // ---------- puzzle selection ----------
-
-  function todayIndex() {
-    var d = new Date();
-    return Math.floor((Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) - LAUNCH_UTC) / 86400000);
-  }
-
-  function mulberry32(seed) {
-    return function () {
-      seed |= 0; seed = seed + 0x6D2B79F5 | 0;
-      var t = Math.imul(seed ^ seed >>> 15, 1 | seed);
-      t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
-      return ((t ^ t >>> 14) >>> 0) / 4294967296;
-    };
-  }
-
-  // A fixed shuffle per length so the daily words don't come out alphabetically.
-  function shuffledOrder(n, seed) {
-    var idx = [], rnd = mulberry32(seed), i;
-    for (i = 0; i < n; i++) idx.push(i);
-    for (i = n - 1; i > 0; i--) {
-      var j = Math.floor(rnd() * (i + 1));
-      var tmp = idx[i]; idx[i] = idx[j]; idx[j] = tmp;
-    }
-    return idx;
-  }
+  // ---------- word lists ----------
 
   var LISTS = {};
   LENGTHS.forEach(function (len) {
     var w = window.WORDS[len];
     LISTS[len] = {
       answers: w.answers,
-      valid: new Set(w.answers.concat(w.guesses)),
-      order: shuffledOrder(w.answers.length, 19340501 + (len - 5)) // 5 keeps its original order
+      answerSet: new Set(w.answers),
+      valid: new Set(w.answers.concat(w.guesses))
     };
   });
 
-  function answerFor(len, day) {
-    var list = LISTS[len], n = list.answers.length;
-    return list.answers[list.order[((day % n) + n) % n]].toUpperCase();
+  function shuffledIndexes(n) {
+    var idx = [], i;
+    for (i = 0; i < n; i++) idx.push(i);
+    for (i = n - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = idx[i]; idx[i] = idx[j]; idx[j] = tmp;
+    }
+    return idx;
+  }
+
+  // Each length draws from a shuffled "bag" of its answers, so no word
+  // repeats until every word of that length has been played.
+  function drawAnswer(len) {
+    if (!bags[len].length) bags[len] = shuffledIndexes(LISTS[len].answers.length);
+    return LISTS[len].answers[bags[len].pop()].toUpperCase();
+  }
+  function cleanBag(saved, len) {
+    var n = LISTS[len].answers.length;
+    if (!Array.isArray(saved)) return [];
+    return saved.filter(function (i, k, a) { return i === (i | 0) && i >= 0 && i < n && a.indexOf(i) === k; });
   }
 
   // Wordle scoring, including repeated letters: greens first, then yellows
@@ -91,54 +81,58 @@
     try {
       var s = JSON.parse(localStorage.getItem(STORE_KEY));
       if (s) return s;
-      var old = JSON.parse(localStorage.getItem(OLD_STORE_KEY));
-      if (old) return { stats: { 5: old.stats }, settings: old.settings, daily: { 5: old.daily } };
+      // Earlier daily-puzzle versions: keep stats and settings, start fresh words.
+      var v2 = JSON.parse(localStorage.getItem('woodtype-wordle:v2'));
+      if (v2) return { stats: v2.stats, settings: v2.settings };
+      var v1 = JSON.parse(localStorage.getItem('woodtype-wordle:v1'));
+      if (v1) return { stats: { 5: v1.stats }, settings: v1.settings };
     } catch (e) { /* storage unavailable */ }
     return {};
   }
+  function serializeGames() {
+    var out = {};
+    LENGTHS.forEach(function (len) {
+      var g = games[len];
+      out[len] = { answer: g.answer, guesses: g.guesses, hard: g.hard, hints: g.hints, counted: g.counted };
+    });
+    return out;
+  }
   function writeStore() {
     try {
-      var daily = {};
-      LENGTHS.forEach(function (len) {
-        var d = dailies[len];
-        daily[len] = { day: d.day, guesses: d.guesses, hard: d.hard, hints: d.hints };
-      });
-      localStorage.setItem(STORE_KEY, JSON.stringify({ stats: stats, settings: settings, daily: daily }));
+      localStorage.setItem(STORE_KEY, JSON.stringify({ stats: stats, settings: settings, games: serializeGames(), bags: bags }));
     } catch (e) { /* storage unavailable: the game still works for this visit */ }
   }
 
-  function makeGame(mode, len, answer, day) {
-    return { mode: mode, len: len, rows: rowsFor(len), answer: answer, day: day, guesses: [], current: '', status: 'playing', hard: false, hints: [] };
+  function makeGame(len, answer) {
+    return { len: len, rows: rowsFor(len), answer: answer, guesses: [], current: '', status: 'playing', hard: false, hints: [], counted: false };
   }
   function statusOf(g) {
     if (g.guesses[g.guesses.length - 1] === g.answer) return 'won';
     return g.guesses.length >= g.rows ? 'lost' : 'playing';
   }
-  function restoreInto(g, saved) {
-    if (!saved) return;
+  // Resume an unfinished word; a finished one is replaced by a fresh word.
+  function restoreGame(len, saved) {
+    if (!saved || typeof saved.answer !== 'string' || !LISTS[len].answerSet.has(saved.answer.toLowerCase())) return null;
+    var g = makeGame(len, saved.answer.toUpperCase());
     if (Array.isArray(saved.guesses)) {
       g.guesses = saved.guesses
-        .filter(function (w) { return typeof w === 'string' && w.length === g.len; })
+        .filter(function (w) { return typeof w === 'string' && w.length === len; })
         .slice(0, g.rows)
         .map(function (w) { return w.toUpperCase(); });
     }
     if (Array.isArray(saved.hints)) {
       g.hints = saved.hints
-        .filter(function (i, n, a) { return i === (i | 0) && i >= 0 && i < g.len && a.indexOf(i) === n; })
-        .slice(0, maxHints(g.len));
+        .filter(function (i, k, a) { return i === (i | 0) && i >= 0 && i < len && a.indexOf(i) === k; })
+        .slice(0, maxHints(len));
     }
     g.hard = !!saved.hard;
+    g.counted = !!saved.counted;
     g.status = statusOf(g);
-  }
-  function loadDaily(len, saved) {
-    var day = todayIndex();
-    var g = makeGame('daily', len, answerFor(len, day), day);
-    if (saved && saved.day === day) restoreInto(g, saved);
-    return g;
+    return g.status === 'playing' ? g : null;
   }
   function loadStats(saved, len) {
     var rows = rowsFor(len);
-    var s = Object.assign({ played: 0, wins: 0, streak: 0, maxStreak: 0, dist: [], lastWinDay: null, lastDay: null }, saved);
+    var s = Object.assign({ played: 0, wins: 0, streak: 0, maxStreak: 0, dist: [] }, saved);
     var dist = [];
     for (var i = 0; i < rows; i++) dist.push((Array.isArray(s.dist) && s.dist[i]) || 0);
     s.dist = dist;
@@ -146,36 +140,30 @@
   }
 
   var stored = readStore();
-  var firstVisit = !stored.stats;
   var settings = Object.assign({ hard: false, contrast: false, length: 5 }, stored.settings);
   if (LENGTHS.indexOf(settings.length) < 0) settings.length = 5;
   var stats = {};
-  var dailies = {};
+  var bags = {};
+  var games = {};
   LENGTHS.forEach(function (len) {
     stats[len] = loadStats((stored.stats || {})[len], len);
-    dailies[len] = loadDaily(len, (stored.daily || {})[len]);
+    bags[len] = cleanBag((stored.bags || {})[len], len);
+    games[len] = restoreGame(len, (stored.games || {})[len]) || makeGame(len, drawAnswer(len));
   });
-  var game = dailies[settings.length];
+  var game = games[settings.length];
   var busy = false;
   var gen = 0; // bumps when the board is swapped, so stale animation timers do nothing
 
-  function normalizeStreaks() {
-    var today = todayIndex();
-    LENGTHS.forEach(function (len) {
-      var s = stats[len];
-      if (s.lastWinDay === null || s.lastWinDay < today - 1) s.streak = 0;
-    });
-  }
+  // Streak = wins in a row; a loss resets it.
   function recordResult(g) {
+    if (g.counted) return;
+    g.counted = true;
     var s = stats[g.len];
-    if (s.lastDay === g.day) return; // already counted
     s.played++;
-    s.lastDay = g.day;
     if (g.status === 'won') {
       s.wins++;
       s.dist[g.guesses.length - 1]++;
-      s.streak = s.lastWinDay === g.day - 1 ? s.streak + 1 : 1;
-      s.lastWinDay = g.day;
+      s.streak++;
       s.maxStreak = Math.max(s.maxStreak, s.streak);
     } else {
       s.streak = 0;
@@ -289,18 +277,17 @@
     refreshGhosts();
     updateSubtitle();
     updateSettingsLock();
-    updateHintButton();
-    updateSizeButtons();
+    updateToolbar();
   }
 
   function updateSubtitle() {
     var g = game;
-    var label = g.mode === 'daily' ? 'No. ' + (g.day + 1) : 'Practice';
+    var number = stats[g.len].played + (g.counted ? 0 : 1);
     var tail = g.status === 'won' ? 'Solved in ' + g.guesses.length
       : g.status === 'lost' ? 'Not solved'
       : 'Impression ' + (g.guesses.length + 1) + ' of ' + g.rows;
     var hard = g.guesses.length ? g.hard : settings.hard;
-    $('subtitle').textContent = label + ' · ' + tail + (hard ? ' · Hard' : '');
+    $('subtitle').textContent = 'Word ' + number + ' · ' + tail + (hard ? ' · Hard' : '');
   }
 
   // ---------- messages ----------
@@ -323,7 +310,11 @@
   // ---------- play ----------
 
   function handleKey(code) {
-    if (busy || openModalEl || game.status !== 'playing') return;
+    if (busy || openModalEl) return;
+    if (game.status !== 'playing') {
+      if (code === 'ENTER') nextWord(); // Enter after a finished word deals the next one
+      return;
+    }
     if (code === 'ENTER') submit();
     else if (code === 'BACK') removeLetter();
     else if (/^[A-Z]$/.test(code)) addLetter(code);
@@ -342,8 +333,7 @@
     var g = game;
     if (!g.current) return;
     g.current = g.current.slice(0, -1);
-    var t = tiles[g.guesses.length][g.current.length];
-    paint(t);
+    paint(tiles[g.guesses.length][g.current.length]);
     refreshGhosts();
   }
 
@@ -410,10 +400,8 @@
     g.guesses.push(guess);
     g.current = '';
     g.status = statusOf(g);
-    if (g.mode === 'daily') {
-      if (g.status !== 'playing') recordResult(g);
-      writeStore(); // save before the animation so a reload can't lose the guess
-    }
+    if (g.status !== 'playing') recordResult(g);
+    writeStore(); // save before the animation so a reload can't lose the guess
 
     busy = true;
     var g0 = gen;
@@ -426,7 +414,7 @@
       refreshGhosts();
       updateSubtitle();
       updateSettingsLock();
-      updateHintButton();
+      updateToolbar();
       if (g.status === 'won') {
         toast(winLine(r, g.rows), 2000);
         if (!reduced) tiles[r].forEach(function (t, i) { later(function () { t.classList.add('hop'); }, i * 100); });
@@ -438,9 +426,25 @@
     });
   }
 
-  // ---------- hints ----------
+  function nextWord() {
+    var len = game.len;
+    games[len] = makeGame(len, drawAnswer(len));
+    writeStore();
+    switchTo(games[len]);
+  }
+  function switchTo(g) {
+    gen++;
+    busy = false;
+    game = g;
+    clearToasts();
+    closeModal();
+    renderAll();
+  }
+
+  // ---------- toolbar: hint, next word, word length ----------
 
   var btnHint = $('btn-hint');
+  var btnNext = $('btn-next');
 
   function hintsLeft(g) { return maxHints(g.len) - g.hints.length; }
 
@@ -460,11 +464,11 @@
 
     var pos = open[Math.floor(Math.random() * open.length)];
     g.hints.push(pos);
-    if (g.mode === 'daily') writeStore();
+    writeStore();
 
     markKey(g.answer[pos], 'correct');
     refreshGhosts();
-    updateHintButton();
+    updateToolbar();
     var t = tiles[g.guesses.length][pos];
     if (!reduced && t.dataset.state === 'empty') restart(t, 'pop');
     var msg = 'Hint: ' + ORDINALS[pos] + ' letter is ' + g.answer[pos];
@@ -472,44 +476,29 @@
     announce(msg);
   }
 
-  function updateHintButton() {
-    var g = game, left = hintsLeft(g);
+  // While playing the right-hand button is Hint; once the word is done it becomes Next word.
+  function updateToolbar() {
+    var g = game, over = g.status !== 'playing', left = hintsLeft(g);
+    btnHint.hidden = over;
+    btnNext.hidden = !over;
     $('hint-count').textContent = left;
-    btnHint.disabled = g.status !== 'playing' || left <= 0;
+    btnHint.disabled = left <= 0;
     btnHint.setAttribute('aria-label', left > 0 ? 'Get a hint, ' + left + ' left' : 'No hints left');
+    sizeBtns.forEach(function (b) { b.setAttribute('aria-pressed', String(Number(b.dataset.len) === g.len)); });
   }
   btnHint.addEventListener('click', useHint);
+  btnNext.addEventListener('click', nextWord);
 
-  // ---------- word length ----------
-
+  function pickLength(len) {
+    settings.length = len;
+    writeStore();
+    if (game === games[len]) closeModal();
+    else switchTo(games[len]); // switchTo closes any open popup too
+  }
   var sizeBtns = Array.prototype.slice.call(document.querySelectorAll('.size-btn'));
-  function updateSizeButtons() {
-    sizeBtns.forEach(function (b) { b.setAttribute('aria-pressed', String(Number(b.dataset.len) === game.len)); });
-  }
   sizeBtns.forEach(function (b) {
-    b.addEventListener('click', function () {
-      var len = Number(b.dataset.len);
-      if (len === game.len && game.mode === 'daily') return;
-      settings.length = len;
-      writeStore();
-      switchTo(dailies[len]);
-    });
+    b.addEventListener('click', function () { pickLength(Number(b.dataset.len)); });
   });
-
-  function startPractice() {
-    var len = game.len, list = LISTS[len].answers, pick;
-    do { pick = list[Math.floor(Math.random() * list.length)].toUpperCase(); } while (pick === dailies[len].answer);
-    switchTo(makeGame('practice', len, pick, null));
-    toast('Practice word set. Stats are paused.', 1800);
-  }
-  function switchTo(g) {
-    gen++;
-    busy = false;
-    game = g;
-    clearToasts();
-    closeModal();
-    renderAll();
-  }
 
   // ---------- modals ----------
 
@@ -527,9 +516,8 @@
   function closeModal(swapping) {
     if (!openModalEl) return;
     openModalEl.hidden = true;
-    if (openModalEl.id === 'modal-stats') stopCountdown();
     openModalEl = null;
-    if (!swapping && lastFocus && lastFocus.focus && lastFocus !== document.body) lastFocus.focus({ preventScroll: true });
+    if (!swapping && lastFocus && lastFocus.focus && lastFocus !== document.body && !lastFocus.hidden) lastFocus.focus({ preventScroll: true });
   }
   function trapTab(e) {
     var f = openModalEl.querySelectorAll('button:not([hidden]):not([disabled]), input:not([disabled]), textarea:not([hidden])');
@@ -549,30 +537,21 @@
 
   // ---------- welcome ----------
 
-  function dailyStatus(d) {
-    if (d.status === 'won') return 'Solved in ' + d.guesses.length;
-    if (d.status === 'lost') return 'Not solved';
-    return d.guesses.length ? d.guesses.length + ' of ' + d.rows + ' tries used' : 'Not started';
-  }
-
   function openWelcome() {
-    var day = dailies[LENGTHS[0]].day;
-    var date = new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
-    $('welcome-edition').textContent = 'No. ' + (day + 1) + ' · ' + date;
-
     var wrap = $('welcome-sizes');
     wrap.textContent = '';
     LENGTHS.forEach(function (len) {
-      var d = dailies[len], status = dailyStatus(d);
+      var g = games[len], wins = stats[len].wins;
+      var status = g.guesses.length ? g.guesses.length + ' of ' + g.rows + ' tries used' : 'New word ready';
       var card = document.createElement('button');
       card.type = 'button';
       card.className = 'size-card';
-      card.setAttribute('aria-pressed', String(game.mode === 'daily' && game.len === len));
-      card.setAttribute('aria-label', 'Play ' + len + ' letters, ' + status);
+      card.setAttribute('aria-pressed', String(game.len === len));
+      card.setAttribute('aria-label', 'Play ' + len + ' letters. ' + status + (wins ? ', ' + wins + ' solved so far' : ''));
 
       var block = document.createElement('span');
       block.className = 'tile';
-      block.dataset.state = d.status === 'won' ? 'correct' : d.status === 'lost' ? 'absent' : 'tbd';
+      block.dataset.state = 'tbd';
       block.textContent = len;
       var name = document.createElement('span');
       name.className = 'size-name';
@@ -581,13 +560,14 @@
       note.className = 'size-status';
       note.textContent = status;
       card.append(block, name, note);
+      if (wins) {
+        var solved = document.createElement('span');
+        solved.className = 'size-solved';
+        solved.textContent = wins + ' solved';
+        card.append(solved);
+      }
 
-      card.addEventListener('click', function () {
-        settings.length = len;
-        writeStore();
-        if (game === dailies[len]) closeModal();
-        else switchTo(dailies[len]); // switchTo closes the popup too
-      });
+      card.addEventListener('click', function () { pickLength(len); });
       wrap.appendChild(card);
     });
 
@@ -604,18 +584,12 @@
 
   // ---------- statistics ----------
 
-  var countdownTimer = 0;
-
   function openStats() {
     renderStats();
-    openModal('modal-stats');
-    tickCountdown();
-    countdownTimer = setInterval(tickCountdown, 1000);
+    openModal('modal-stats', game.status !== 'playing' ? '#btn-next-stats' : null);
   }
-  function stopCountdown() { clearInterval(countdownTimer); }
 
   function renderStats() {
-    normalizeStreaks();
     var g = game, s = stats[g.len];
     $('stats-sub').textContent = g.len + '-letter games';
     var pct = s.played ? Math.round(s.wins / s.played * 100) : 0;
@@ -625,10 +599,10 @@
 
     var dist = $('dist');
     if (!s.wins) {
-      dist.innerHTML = '<p class="dist-empty">Win a daily ' + g.len + '-letter puzzle to start your record.</p>';
+      dist.innerHTML = '<p class="dist-empty">Solve a ' + g.len + '-letter word to start your record.</p>';
     } else {
       var max = Math.max.apply(null, s.dist);
-      var cur = g.mode === 'daily' && g.status === 'won' ? g.guesses.length - 1 : -1;
+      var cur = g.status === 'won' ? g.guesses.length - 1 : -1;
       dist.innerHTML = s.dist.map(function (n, i) {
         var w = Math.max(7, n / max * 100);
         return '<div class="dist-row"><span class="dist-n">' + (i + 1) + '</span>' +
@@ -647,43 +621,18 @@
     }
     $('stats-foot').hidden = !done;
     $('share-fallback').hidden = true;
-    $('practice-note').hidden = g.mode !== 'practice';
-    $('btn-today').hidden = g.mode !== 'practice';
-    $('btn-practice').textContent = g.mode === 'practice' ? 'Another practice word' : 'Practice a random word';
   }
-
-  function tickCountdown() {
-    var now = new Date();
-    var next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-    var secs = Math.max(0, Math.floor((next - now) / 1000));
-    $('countdown').textContent = [Math.floor(secs / 3600), Math.floor(secs % 3600 / 60), secs % 60]
-      .map(function (n) { return String(n).padStart(2, '0'); }).join(':');
-  }
-
-  // Roll over to the new daily words if the page stays open past midnight.
-  setInterval(function () {
-    var today = todayIndex();
-    if (dailies[LENGTHS[0]].day === today) return;
-    LENGTHS.forEach(function (len) { dailies[len] = loadDaily(len, null); });
-    normalizeStreaks();
-    writeStore();
-    if (game.mode === 'daily' && !busy) {
-      switchTo(dailies[game.len]);
-      toast('New words are ready', 2400);
-    }
-  }, 30000);
 
   function shareText(g) {
     var squares = settings.contrast
       ? { correct: '🟧', present: '🟦', absent: '⬛' }
       : { correct: '🟩', present: '🟨', absent: '⬛' };
     var n = g.status === 'won' ? g.guesses.length : 'X';
-    var label = g.mode === 'daily' ? 'No. ' + (g.day + 1) : 'Practice';
     var hints = g.hints.length ? ' · ' + plural(g.hints.length, 'hint') : '';
     var grid = g.guesses.map(function (w) {
       return score(w, g.answer).map(function (s) { return squares[s]; }).join('');
     }).join('\n');
-    return 'Wood Type Wordle ' + label + ' · ' + g.len + ' letters ' + n + '/' + g.rows + (g.hard ? '*' : '') + hints + '\n\n' + grid;
+    return 'Wood Type Wordle · ' + g.len + ' letters ' + n + '/' + g.rows + (g.hard ? '*' : '') + hints + '\n\n' + grid;
   }
   function showShareFallback(text) {
     var ta = $('share-fallback');
@@ -702,8 +651,7 @@
       );
     } catch (e) { showShareFallback(text); }
   });
-  $('btn-practice').addEventListener('click', startPractice);
-  $('btn-today').addEventListener('click', function () { switchTo(dailies[game.len]); });
+  $('btn-next-stats').addEventListener('click', nextWord);
 
   // ---------- settings ----------
 
@@ -759,39 +707,29 @@
 
   function start(data) {
     data = data || {};
-    var p = data.practice;
-    if (p && LENGTHS.indexOf(p.len) >= 0 && typeof p.answer === 'string' && p.answer.length === p.len) {
-      game = makeGame('practice', p.len, p.answer, null);
-      restoreInto(game, p);
-    } else if (LENGTHS.indexOf(data.len) >= 0) {
-      game = dailies[data.len];
+    if (data.games) {
+      LENGTHS.forEach(function (len) {
+        var g = restoreGame(len, data.games[len]);
+        if (g) games[len] = g;
+      });
     }
+    game = games[LENGTHS.indexOf(data.len) >= 0 ? data.len : settings.length];
     if (typeof data.current === 'string' && game.status === 'playing') game.current = data.current.slice(0, game.len);
 
-    normalizeStreaks();
     optContrast.checked = settings.contrast;
     applyContrast();
     renderAll();
+    writeStore(); // keep any freshly dealt words, so a reload shows the same ones
 
-    if (firstVisit) writeStore();
     // Greet every fresh page load; skip it when a live update restores a board.
-    var restoring = data.practice || typeof data.current === 'string';
-    if (!restoring) later(openWelcome, 250);
+    if (!data.games) later(openWelcome, 250);
   }
 
-  // Keep the current board across live page updates.
+  // Keep the current boards across live page updates.
   var hot = window.claude && window.claude.hot;
   try {
     if (hot && typeof hot.snapshot === 'function') {
-      hot.snapshot(function () {
-        return {
-          len: game.len,
-          current: game.current,
-          practice: game.mode === 'practice'
-            ? { len: game.len, answer: game.answer, guesses: game.guesses, hard: game.hard, hints: game.hints }
-            : null
-        };
-      });
+      hot.snapshot(function () { return { len: game.len, current: game.current, games: serializeGames() }; });
     }
   } catch (e) { /* not running inside a viewer */ }
   if (hot && typeof hot.ready === 'function') hot.ready(start);

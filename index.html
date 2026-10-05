@@ -18,9 +18,8 @@
       </button>
     </div>
     <div class="mast-center">
-      <p class="welcome">hey chatz</p>
       <h1 class="title">WORDLE</h1>
-      <p class="subtitle" id="subtitle">No. 1 · Impression 1 of 6</p>
+      <p class="subtitle" id="subtitle">Word 1 · Impression 1 of 6</p>
     </div>
     <div class="mast-side right">
       <button type="button" class="icon-btn" id="btn-stats" aria-label="Statistics">
@@ -43,6 +42,10 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5"/></svg>
       <span>Hint</span>
       <span class="hint-count" id="hint-count" aria-hidden="true">2</span>
+    </button>
+    <button type="button" class="next-btn" id="btn-next" hidden>
+      Next word
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
     </button>
   </div>
 
@@ -68,8 +71,7 @@
       <div class="wrow"><span class="tile" data-state="correct" style="--i:3">C</span><span class="tile" data-state="correct" style="--i:4">H</span><span class="tile" data-state="correct" style="--i:5">A</span><span class="tile" data-state="correct" style="--i:6">T</span><span class="tile" data-state="correct" style="--i:7">Z</span></div>
     </div>
     <h2 id="welcome-title">Welcome to Wood Type Wordle</h2>
-    <p class="welcome-edition" id="welcome-edition">No. 1</p>
-    <p id="welcome-desc">Fresh words are set on the press every day. Pick a size and see how many tries it takes you.</p>
+    <p id="welcome-desc">Guess as many words as you like. Pick a size to start.</p>
     <div class="welcome-sizes" id="welcome-sizes"></div>
     <div class="welcome-actions">
       <button type="button" class="btn" id="btn-welcome-play">Play 5 letters</button>
@@ -104,7 +106,7 @@
       <div class="mini" aria-hidden="true"><span class="tile" data-state="tbd">B</span><span class="tile" data-state="tbd">L</span><span class="tile" data-state="absent">O</span><span class="tile" data-state="tbd">C</span><span class="tile" data-state="tbd">K</span></div>
       <p><b>O</b> is not in the word at all. Its block stays bare wood.</p>
     </div>
-    <p class="fine">Each length has its own daily word and its own statistics. New words are set every day at midnight, your local time.</p>
+    <p class="fine">Play as many words as you like. When you finish one, tap Next word or press Enter for another. Each length keeps its own statistics.</p>
   </section>
 </div>
 
@@ -119,23 +121,18 @@
     <h3>Guess distribution</h3>
     <div class="dist" id="dist"></div>
     <p class="result" id="result" hidden></p>
-    <p class="fine center" id="practice-note" hidden>Practice games don't count toward your statistics.</p>
     <div class="sheet-foot" id="stats-foot" hidden>
-      <div class="next">
-        <span class="next-label">Next word in</span>
-        <span class="next-time" id="countdown">--:--:--</span>
-      </div>
-      <button type="button" class="btn" id="btn-share">
+      <button type="button" class="btn ghost" id="btn-share">
         Share
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V4M7.5 8.5 12 4l4.5 4.5M5 13v6h14v-6"/></svg>
+      </button>
+      <button type="button" class="btn" id="btn-next-stats">
+        Next word
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
       </button>
     </div>
     <label class="sr-only" for="share-fallback">Your result, ready to copy</label>
     <textarea id="share-fallback" class="share-fallback" readonly hidden></textarea>
-    <div class="sheet-links">
-      <button type="button" class="link-btn" id="btn-practice">Practice a random word</button>
-      <button type="button" class="link-btn" id="btn-today" hidden>Back to today's puzzle</button>
-    </div>
   </section>
 </div>
 
